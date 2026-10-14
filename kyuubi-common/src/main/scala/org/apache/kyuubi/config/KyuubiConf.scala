@@ -406,8 +406,8 @@ object KyuubiConf {
     .createOptional
 
   val KINIT_INTERVAL: ConfigEntry[Long] = buildConf("kyuubi.kinit.interval")
-    .doc("How often will the Kyuubi server run `kinit -kt [keytab] [principal]` to renew the" +
-      " local Kerberos credentials cache")
+    .doc("How often will the Kyuubi server renew the Kerberos credentials in-process using" +
+      " the keytab, without touching the local Kerberos credentials cache")
     .version("1.0.0")
     .audience(SERVER)
     .immutable
@@ -417,7 +417,8 @@ object KyuubiConf {
   val KINIT_MAX_ATTEMPTS: ConfigEntry[Int] = buildConf("kyuubi.kinit.max.attempts")
     .audience(SERVER)
     .immutable
-    .doc("How many times will `kinit` process retry")
+    .doc("How many times will the in-process Kerberos credentials renewal retry before the" +
+      " server exits")
     .version("1.0.0")
     .intConf
     .createWithDefault(10)

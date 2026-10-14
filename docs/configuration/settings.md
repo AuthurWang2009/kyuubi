@@ -356,12 +356,12 @@ You can configure the Kyuubi properties in `$KYUUBI_HOME/conf/kyuubi-defaults.co
 
 ### Kinit
 
-|            Key            |      Default      |                                                       Meaning                                                       |   Type   | Since |
-|---------------------------|-------------------|---------------------------------------------------------------------------------------------------------------------|----------|-------|
-| kyuubi.kinit.interval     | PT1H              | How often will the Kyuubi server run `kinit -kt [keytab] [principal]` to renew the local Kerberos credentials cache | duration | 1.0.0 |
-| kyuubi.kinit.keytab       | &lt;undefined&gt; | Location of Kyuubi server's keytab.                                                                                 | string   | 1.0.0 |
-| kyuubi.kinit.max.attempts | 10                | How many times will `kinit` process retry                                                                           | int      | 1.0.0 |
-| kyuubi.kinit.principal    | &lt;undefined&gt; | Name of the Kerberos principal.                                                                                     | string   | 1.0.0 |
+|            Key            |      Default      |                                                                      Meaning                                                                       |   Type   | Since |
+|---------------------------|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|----------|-------|
+| kyuubi.kinit.interval     | PT1H              | How often will the Kyuubi server renew the Kerberos credentials in-process using the keytab, without touching the local Kerberos credentials cache | duration | 1.0.0 |
+| kyuubi.kinit.keytab       | &lt;undefined&gt; | Location of Kyuubi server's keytab.                                                                                                                | string   | 1.0.0 |
+| kyuubi.kinit.max.attempts | 10                | How many times will the in-process Kerberos credentials renewal retry before the server exits                                                      | int      | 1.0.0 |
+| kyuubi.kinit.principal    | &lt;undefined&gt; | Name of the Kerberos principal.                                                                                                                    | string   | 1.0.0 |
 
 ### Kubernetes
 

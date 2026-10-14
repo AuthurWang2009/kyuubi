@@ -17,6 +17,7 @@
 
 package org.apache.kyuubi.server
 
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 import org.apache.hadoop.security.UserGroupInformation
@@ -25,23 +26,31 @@ import org.apache.kyuubi.config.KyuubiConf
 import org.apache.kyuubi.service.AbstractService
 import org.apache.kyuubi.util.{KyuubiHadoopUtils, ThreadUtils}
 
+/**
+ * A service that keeps the Kerberos credentials of the Kyuubi server process fresh by
+ * re-logining from the keytab in-process.
+ *
+ * Unlike periodically running the external `kinit -kt` command, it never reads or rewrites
+ * the local Kerberos credentials cache (ccache) file, so neither this service nor other
+ * components on the host that rely on the same cache are affected by it.
+ */
 class KinitAuxiliaryService() extends AbstractService("KinitAuxiliaryService") {
 
   private val executor = ThreadUtils.newDaemonSingleThreadScheduledExecutor(getName)
 
-  private var kinitInterval: Long = _
-  private var kinitMaxAttempts: Int = _
-  @volatile private var kinitAttempts: Int = _
+  private var renewalInterval: Long = _
+  private var renewalMaxAttempts: Int = _
+  @volatile private var renewalAttempts: Int = _
 
-  private var kinitTask: Runnable = _
+  private var renewalTask: Runnable = _
 
   override def initialize(conf: KyuubiConf): Unit = {
     if (UserGroupInformation.isSecurityEnabled) {
       val keytab = conf.get(KyuubiConf.SERVER_KEYTAB)
       val principal = conf.get(KyuubiConf.SERVER_PRINCIPAL)
         .map(KyuubiHadoopUtils.getServerPrincipal)
-      kinitInterval = conf.get(KyuubiConf.KINIT_INTERVAL)
-      kinitMaxAttempts = conf.get(KyuubiConf.KINIT_MAX_ATTEMPTS)
+      renewalInterval = conf.get(KyuubiConf.KINIT_INTERVAL)
+      renewalMaxAttempts = conf.get(KyuubiConf.KINIT_MAX_ATTEMPTS)
 
       require(keytab.nonEmpty && principal.nonEmpty, "principal or keytab is missing")
       if (conf.get(KyuubiConf.ENGINE_DO_AS_ENABLED) &&
@@ -51,25 +60,24 @@ class KinitAuxiliaryService() extends AbstractService("KinitAuxiliaryService") {
           " to exclude any credential including keytab.")
       }
       UserGroupInformation.loginUserFromKeytab(principal.get, keytab.get)
-      val krb5Conf = Option(System.getProperty("java.security.krb5.conf"))
-        .orElse(Option(System.getenv("KRB5_CONFIG")))
-      val commands = Seq("kinit", "-kt", keytab.get, principal.get)
-      val kinitProc = new ProcessBuilder(commands: _*).inheritIO()
-      krb5Conf.foreach(kinitProc.environment().put("KRB5_CONFIG", _))
-      kinitTask = new Runnable {
+      renewalTask = new Runnable {
         override def run(): Unit = {
-          val process = kinitProc.start()
-          if (process.waitFor() == 0) {
-            info(s"Successfully ${commands.mkString(" ")}")
-            kinitAttempts = 0
-            executor.schedule(this, kinitInterval, TimeUnit.MILLISECONDS)
-          } else {
-            if (kinitAttempts >= kinitMaxAttempts) {
-              error(s"Failed to kinit with $kinitAttempts attempts, will exit...")
-              System.exit(-1)
-            }
-            kinitAttempts += 1
-            executor.submit(this)
+          try {
+            UserGroupInformation.getLoginUser.checkTGTAndReloginFromKeytab()
+            renewalAttempts = 0
+            debug("Successfully checked and renewed the Kerberos credentials from keytab")
+            executor.schedule(this, renewalInterval, TimeUnit.MILLISECONDS)
+          } catch {
+            case e: IOException =>
+              if (renewalAttempts >= renewalMaxAttempts) {
+                error(
+                  s"Failed to renew the Kerberos credentials from keytab after" +
+                    s" $renewalAttempts attempts, will exit...",
+                  e)
+                System.exit(-1)
+              }
+              renewalAttempts += 1
+              executor.submit(this)
           }
         }
       }
@@ -80,7 +88,7 @@ class KinitAuxiliaryService() extends AbstractService("KinitAuxiliaryService") {
   override def start(): Unit = {
     super.start()
     if (UserGroupInformation.isSecurityEnabled) {
-      executor.submit(kinitTask)
+      executor.submit(renewalTask)
     }
   }
 
